@@ -27,6 +27,15 @@ declare module 'fastify' { interface FastifyRequest { session?: { id: string; cs
 const app = Fastify({ logger: true, trustProxy: config.trustProxy });
 const coverCache = new Map<string, { body: Buffer; type: string; expiresAt: number }>();
 const isDlsiteAssetUrl = (url: URL) => url.protocol === 'https:' && /(^|\.)dlsite\.(?:com|jp)$/i.test(url.hostname);
+// An RJ identifier contains enough information to derive DLsite's standard
+// 4:3 cover URL. This keeps manually imported wishlist entries useful right
+// away, without making a batch import wait for metadata requests.
+const wishlistFallbackCoverUrl = (rjCode: string) => {
+  const serial = Number(rjCode.slice(2));
+  if (!Number.isSafeInteger(serial) || serial < 1) return null;
+  const bucket = `RJ${String(Math.ceil(serial / 1000) * 1000).padStart(8, '0')}`;
+  return `https://img.dlsite.jp/modpub/images2/ana/doujin/${bucket}/${rjCode}_ana_img_main.webp`;
+};
 const execFileAsync = promisify(execFile);
 await app.register(cookie);
 await app.register(rateLimit, { global: false });
@@ -95,8 +104,16 @@ app.post('/api/wishlist/import', async request => {
   const addedAt = Date.now();
   let added = 0;
   for (const rjCode of uniqueCodes) {
-    const result = await db.insert(wishlistWorks).values({ rjCode, title: rjCode, voiceActors: null, coverUrl: null, sourceUrl: `https://www.dlsite.com/maniax/work/=/product_id/${rjCode}.html`, addedAt }).onConflictDoNothing().run();
-    added += result.changes;
+    const existing = await db.select({ rjCode: wishlistWorks.rjCode, coverUrl: wishlistWorks.coverUrl }).from(wishlistWorks).where(eq(wishlistWorks.rjCode, rjCode)).get();
+    const coverUrl = wishlistFallbackCoverUrl(rjCode);
+    if (!existing) {
+      await db.insert(wishlistWorks).values({ rjCode, title: rjCode, voiceActors: null, coverUrl, sourceUrl: `https://www.dlsite.com/maniax/work/=/product_id/${rjCode}.html`, addedAt });
+      added++;
+    } else if (!existing.coverUrl && coverUrl) {
+      // Re-importing an older manually entered RJ code upgrades its formerly
+      // blank card without overwriting a title or cover obtained from DLsite.
+      await db.update(wishlistWorks).set({ coverUrl }).where(eq(wishlistWorks.rjCode, rjCode));
+    }
   }
   return { added, existing: uniqueCodes.length - added, total: uniqueCodes.length };
 });
