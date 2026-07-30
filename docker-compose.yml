@@ -1,0 +1,17 @@
+services:
+  newvoice:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "3001:3001"
+    environment:
+      ACCESS_PASSWORD: ${ACCESS_PASSWORD:?Set ACCESS_PASSWORD in .env}
+      DATA_DIR: /data
+      MEDIA_ROOT: /media
+      TRUST_PROXY: "true"
+    volumes:
+      - newvoice-data:/data
+      # Replace the host path before starting. The media mount intentionally stays read-only.
+      - /absolute/path/to/your/audio:/media:ro
+volumes:
+  newvoice-data:
