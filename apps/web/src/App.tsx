@@ -52,6 +52,21 @@ const discoveryListingUrls: Record<DiscoveryOrder, string> = {
   subtitle: "https://www.dlsite.com/maniax/fsr/=/language/jp/sex_category%5B0%5D/male/keyword/%E5%8F%B0%E6%9C%AC/ana_flg/all/work_category%5B0%5D/doujin/work_category%5B1%5D/books/work_category%5B2%5D/pc/work_category%5B3%5D/app/order%5B0%5D/release_d/work_type_category%5B0%5D/audio/work_type_category_name%5B0%5D/%E9%9F%B3%E5%A3%B0%E3%83%BBASMR/genre%5B0%5D/048/genre_name%5B0%5D/%E5%AF%9D%E5%8F%96%E3%82%89%E3%82%8C/options_and_or/and/options%5B0%5D/JPN/options%5B1%5D/CHI/options%5B2%5D/CHI_HANS/options%5B3%5D/CHI_HANT/options%5B4%5D/NM/options_name%5B0%5D/%E6%97%A5%E8%AF%AD%E4%BD%9C%E5%93%81/options_name%5B1%5D/%E4%B8%AD%E6%96%87%E4%BD%9C%E5%93%81/options_name%5B2%5D/%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87%E4%BD%9C%E5%93%81/options_name%5B3%5D/%E7%B9%81%E4%BD%93%E4%B8%AD%E6%96%87%E4%BD%9C%E5%93%81/options_name%5B4%5D/%E6%97%A0%E8%AF%AD%E8%A8%80%E9%99%90%E5%88%B6%E4%BD%9C%E5%93%81/per_page/30/page/2/show_type/3",
 };
 
+// Older manually imported wishlist records predate the persisted cover URL.
+// Derive DLsite's 4:3 cover deterministically so those cards render without
+// requiring a database migration or re-import.
+function fallbackWishlistCoverUrl(rjCode: string) {
+  const serial = Number(rjCode.slice(2));
+  if (!Number.isSafeInteger(serial) || serial < 1) return null;
+  const bucket = `RJ${String(Math.ceil(serial / 1000) * 1000).padStart(8, "0")}`;
+  return `https://img.dlsite.jp/modpub/images2/ana/doujin/${bucket}/${rjCode}_ana_img_main.webp`;
+}
+
+function proxyWishlistCover(coverUrl: string | null, rjCode: string) {
+  const source = coverUrl ?? fallbackWishlistCoverUrl(rjCode);
+  return source ? `/api/discovery/cover?url=${encodeURIComponent(source)}` : "";
+}
+
 const trendingPreview: DiscoveryWork[] = [
   {
     id: "preview-01",
@@ -946,8 +961,8 @@ function WishlistPage({ items, toggleWish, refresh }: { items: WishlistWork[]; t
         title: item.title,
         voice: item.voiceActors ?? "未标注",
         rjCode: item.rjCode,
-        cover: item.coverUrl ? `/api/discovery/cover?url=${encodeURIComponent(item.coverUrl)}` : "",
-        coverUrl: item.coverUrl,
+        cover: proxyWishlistCover(item.coverUrl, item.rjCode),
+        coverUrl: item.coverUrl ?? fallbackWishlistCoverUrl(item.rjCode),
         sourceUrl: item.sourceUrl,
       };
       return <article className="ranking-card wishlist-card" key={item.rjCode}>
