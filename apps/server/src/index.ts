@@ -141,6 +141,14 @@ app.post('/api/roots', async (request, reply) => {
   const path = resolve(body.path);
   try { await access(path, constants.R_OK); const info = await stat(path); if (!info.isDirectory()) throw new Error('not directory'); } catch { return reply.code(400).send({ error: '目录不存在、不可读取或不是目录。' }); }
   const now = Date.now();
+  // Adding a path that was previously indexed should be safe. Re-enable and
+  // refresh the existing record instead of leaking SQLite's unique-index
+  // error as a generic 500 response.
+  const existing = await db.select().from(libraryRoots).where(eq(libraryRoots.path, path)).get();
+  if (existing) {
+    const root = await db.update(libraryRoots).set({ label: body.label, enabled: true, updatedAt: now }).where(eq(libraryRoots.id, existing.id)).returning().get();
+    return reply.send({ id: root!.id, label: root!.label, enabled: root!.enabled, existing: true });
+  }
   const root = await db.insert(libraryRoots).values({ ...body, path, createdAt: now, updatedAt: now }).returning().get();
   return reply.code(201).send({ id: root.id, label: root.label, enabled: root.enabled });
 });
