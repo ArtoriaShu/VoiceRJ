@@ -137,8 +137,12 @@ app.post('/api/roots/pick', async (request, reply) => {
   }
 });
 app.post('/api/roots', async (request, reply) => {
-  const body = z.object({ path: z.string().min(1).max(2048), label: z.string().trim().min(1).max(120) }).parse(request.body);
-  const path = resolve(body.path);
+  const parsed = z.object({ path: z.string().trim().min(1).max(2048), label: z.string().trim().max(120).optional() }).safeParse(request.body);
+  if (!parsed.success) return reply.code(400).send({ error: '请输入有效的目录路径和名称。' });
+  const path = resolve(parsed.data.path);
+  // A trailing slash makes `path.split('/').pop()` empty in older clients.
+  // The server owns this fallback so a valid directory path is always enough.
+  const label = parsed.data.label || basename(path) || path;
   try { await access(path, constants.R_OK); const info = await stat(path); if (!info.isDirectory()) throw new Error('not directory'); } catch { return reply.code(400).send({ error: '目录不存在、不可读取或不是目录。' }); }
   const now = Date.now();
   // Adding a path that was previously indexed should be safe. Re-enable and
@@ -146,10 +150,10 @@ app.post('/api/roots', async (request, reply) => {
   // error as a generic 500 response.
   const existing = await db.select().from(libraryRoots).where(eq(libraryRoots.path, path)).get();
   if (existing) {
-    const root = await db.update(libraryRoots).set({ label: body.label, enabled: true, updatedAt: now }).where(eq(libraryRoots.id, existing.id)).returning().get();
+    const root = await db.update(libraryRoots).set({ label, enabled: true, updatedAt: now }).where(eq(libraryRoots.id, existing.id)).returning().get();
     return reply.send({ id: root!.id, label: root!.label, enabled: root!.enabled, existing: true });
   }
-  const root = await db.insert(libraryRoots).values({ ...body, path, createdAt: now, updatedAt: now }).returning().get();
+  const root = await db.insert(libraryRoots).values({ path, label, createdAt: now, updatedAt: now }).returning().get();
   return reply.code(201).send({ id: root.id, label: root.label, enabled: root.enabled });
 });
 app.patch('/api/roots/:id', async request => {
